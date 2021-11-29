@@ -111,7 +111,10 @@ def create_window(df, offset=0):
     
     return butter_window
 
-    
+def create_FP_window(window):
+    '''window for the first FP. 1-window'''
+    pass
+ 
 def get_thickness_n():
     global sample_thickness
     global reference_n
