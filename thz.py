@@ -1,3 +1,8 @@
+'''
+Computes complex refractive index of sample given the sample and the reference time-domain electric fields
+Created by Yu Heng Tao 29 Nov 2021
+'''
+
 import pandas as pd
 import numpy as np
 np.seterr(divide='ignore', invalid='ignore') #ignore divide by zero warning
