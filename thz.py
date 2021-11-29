@@ -174,6 +174,9 @@ if __name__ == '__main__':
     # calculate optical parameters
     sample.absorption, sample.n = calc_absorption(sample, reference)
     
+    # TODO: calculate n obtained from first FP
+    # TODO: calculate estimated sample thickness from the difference between n
+    
     # calculate power spectra
     sample.power = calc_power(sample)
     reference.power = calc_power(reference)
