@@ -24,19 +24,8 @@ class Signal:
         self.frequency = frequency
         self.n = n
 
-def set_skip_sep(system_name):
-    if system_name == 'teraview':
-        skip = 3
-        sep = ','
-    elif system_name == 'menlo':
-        skip = 6
-        sep = '\t'
-    else:
-        print(f'{system_name} not found.')
-    return skip, sep
-
 def read_data(filename, skip, sep):
-    df = pd.read_csv(filename, sep=sep, skiprows=skip, names=['Delays (ps)', 'Signal (a.u.)'])
+    df = pd.read_csv(filename, sep=sep, skiprows=skip, names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
     return df
 
 def create_signal(df, window=1):
@@ -115,13 +104,15 @@ def create_FP_window(window):
     '''window for the first FP. 1-window'''
     pass
  
-def get_thickness_n():
+def get_user_input():
     global sample_thickness
     global reference_n
-    global system_name
-    system_name = var.get()
+    global skip
+    global sep
     sample_thickness = float(thickness_entry.get())*10**-6
     reference_n = float(reference_n_entry.get())
+    skip = int(skip_entry.get())
+    sep = sep_entry.get()
     root.quit()
 
 if __name__ == '__main__':
@@ -141,15 +132,19 @@ if __name__ == '__main__':
     reference_n_entry = tk.Entry(root)
     reference_n_entry.grid(row=1, column=1)
 
-    tk.Radiobutton(root, text='Teraview', variable=var, value='teraview').grid(row=2, column=0)
-    tk.Radiobutton(root, text='Menlo', variable=var, value='menlo').grid(row=2, column=1)
+    tk.Label(root, text='No. header rows:  ').grid(row=2, column=0)
+    skip_entry = tk.Entry(root)
+    skip_entry.grid(row=2, column=1)
 
-    tk.Button(root, text='Calculate', command=get_thickness_n).grid(row=3, column=1)
+    tk.Label(root, text='Delimiter:  ').grid(row=3, column=0)
+    sep_entry = tk.Entry(root)
+    sep_entry.grid(row=3, column=1)
+
+    tk.Button(root, text='Calculate', command=get_user_input).grid(row=4, column=1)
     root.mainloop()
     root.withdraw()
     
     # read data
-    skip, sep = set_skip_sep(system_name)
     df_sample = read_data(sample_filename, skip, sep)
     df_reference = read_data(reference_filename, skip, sep)
     
