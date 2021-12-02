@@ -77,21 +77,23 @@ def get_filenames():
 
     return sample_filename, reference_filename
 
-def calc_FP_peaks(df):
-    '''returns the positions (ps) of the main and FP peaks'''
-    main_peak_ind = df['Signal (a.u.)'].idxmax()
-    main_peak_ps = df.iloc[main_peak_ind, 0]
-    #ignore peaks in the first 10ps after the main pulse
-    second_peak_ind = df.loc[df['Delays (ps)'] > main_peak_ps + 12, 'Signal (a.u.)'].idxmax() 
-    second_peak_ps = df.iloc[second_peak_ind, 0]
-    return main_peak_ps, second_peak_ps
+def find_peak(df, start_ps=None):
+    if start_ps == None:
+        start_ps = df.iloc[0,0]
+    peak_ind = df.loc[df['Delays (ps)'] >= start_ps,'Signal (a.u.)'].idxmax()
+    peak_ps = df.iloc[peak_ind,0]
+    return peak_ind, peak_ps
 
+def shift_data(df, offset=0):
+    shifted_df = df[:].copy()
+    shifted_df.iloc[offset:,1] = df.iloc[:-offset,1]
+    shifted_df.iloc[0:offset, 1] = 0
+    return shifted_df
 
-def create_window(df, offset=0):
+def create_window(df, second_peak_ps, offset=0):
     '''create time-window to exclude FP peaks'''
-    main_peak_ps, second_peak_ps = calc_FP_peaks(df)
-    # butterworth window 50th order, 5 ps by trial and error
-    b, a = signal.butter(50, second_peak_ps-5-offset, analog=True)
+    # butterworth window 50th order, 3 ps by trial and error
+    b, a = signal.butter(50, second_peak_ps-3-offset, analog=True)
     w, h = signal.freqs(b, a, worN=df['Delays (ps)'].values)
     if second_peak_ps < 0:
         butter_window = 1-abs(h)
@@ -99,10 +101,6 @@ def create_window(df, offset=0):
         butter_window = abs(h)
     
     return butter_window
-
-def create_FP_window(window):
-    '''window for the first FP. 1-window'''
-    pass
  
 def get_user_input():
     global sample_thickness
@@ -148,17 +146,37 @@ if __name__ == '__main__':
     df_sample = read_data(sample_filename, skip, sep)
     df_reference = read_data(reference_filename, skip, sep)
     
-    # create signal
-    main_peak_ps_ref, second_peak_ps_ref = calc_FP_peaks(df_reference)
-    main_peak_ps_sample, second_peak_ps_sample = calc_FP_peaks(df_sample)
+    # find peaks
+    main_peak_ind_ref, main_peak_ps_ref = find_peak(df_reference)
+    main_peak_ind_sample, main_peak_ps_sample = find_peak(df_sample)
+
+    main_peak_delay_ind = main_peak_ind_sample - main_peak_ind_ref
     main_peak_delay_ps = main_peak_ps_sample - main_peak_ps_ref
+
+    # shift reference to find FP
+    df_shifted_ref = shift_data(df_reference, main_peak_delay_ind)
+    df_diff = df_sample[:].copy()
+    df_diff.iloc[:,1] = df_sample['Signal (a.u.)'].values - df_shifted_ref['Signal (a.u.)'].values
     
-    if reference_n != 1:
-        ref_window = create_window(df_reference)
-        sample_window = ref_window
-    else:
-        sample_window = create_window(df_sample)
-        ref_window = create_window(df_sample, offset=main_peak_delay_ps)
+    # start searching for second peak 12 ps after main peak
+    start_ps = main_peak_ps_sample + 12
+    second_peak_ind_sample, second_peak_ps_sample = find_peak(df_diff, start_ps=start_ps)
+    print(f'Second peak at {second_peak_ps_sample:.2f} ps')
+    ax = df_sample.plot(x='Delays (ps)', y='Signal (a.u.)')
+    df_shifted_ref.plot(x='Delays (ps)', y='Signal (a.u.)', ax=ax)
+    plt.axvline(x=second_peak_ps_sample,color='r')
+    plt.legend(['Sample', 'Shifted reference'])
+    plt.show()
+
+    # ask user for alternative FP peak location
+    second_peak_ps_sample_corrected = input('Enter alternative FP peak location (ps):  ')
+    if second_peak_ps_sample_corrected != '':
+        second_peak_ps_sample = float(second_peak_ps_sample_corrected)
+    
+    sample_window = create_window(df_sample ,second_peak_ps_sample)
+    ref_window = create_window(df_sample, second_peak_ps_sample, offset=main_peak_delay_ps)
+
+    
     
     sample = create_signal(df_sample, window=sample_window)
     reference = create_signal(df_reference, window=ref_window)
@@ -181,9 +199,12 @@ if __name__ == '__main__':
     
     axs[0,0].plot(sample.frequency*10**-12, sample.n)
     axs[1,0].plot(sample.frequency*10**-12, sample.absorption)
+
     axs[0,1].plot(df_sample['Delays (ps)'].values, df_sample['Signal (a.u.)'].values, label='Sample')
-    axs[0,1].plot(df_reference['Delays (ps)'].values, df_reference['Signal (a.u.)'].values, label='Reference')
-    axs[0,1].plot(df_sample['Delays (ps)'].values, ref_window, label='Window')
+    axs[0,1].plot(df_shifted_ref['Delays (ps)'].values, df_shifted_ref['Signal (a.u.)'].values, label='Shifted reference')
+    axs[0,1].plot(df_sample['Delays (ps)'].values, sample_window, label='Sample window')
+    axs[0,1].axvline(x=second_peak_ps_sample, color='r')
+
     axs[1,1].plot(sample.frequency*10**-12, sample.power, label='Sample')
     axs[1,1].plot(reference.frequency*10**-12, reference.power, label='Reference') 
     
