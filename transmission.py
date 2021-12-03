@@ -122,21 +122,21 @@ if __name__ == '__main__':
 
     sample_filename, reference_filename = get_filenames()
 
-    tk.Label(root, text='Sample thickness (um):  ').grid(row=0, column=0)
-    thickness_entry = tk.Entry(root)
-    thickness_entry.grid(row=0, column=1)
-    
-    tk.Label(root, text='Reference refractive index:  ').grid(row=1, column=0)
-    reference_n_entry = tk.Entry(root)
-    reference_n_entry.grid(row=1, column=1)
-
-    tk.Label(root, text='No. header rows:  ').grid(row=2, column=0)
-    skip_entry = tk.Entry(root)
-    skip_entry.grid(row=2, column=1)
-
-    tk.Label(root, text='Delimiter:  ').grid(row=3, column=0)
+    tk.Label(root, text='Delimiter:  ').grid(row=0, column=0)
     sep_entry = tk.Entry(root)
-    sep_entry.grid(row=3, column=1)
+    sep_entry.grid(row=0, column=1)
+
+    tk.Label(root, text='No. header rows:  ').grid(row=1, column=0)
+    skip_entry = tk.Entry(root)
+    skip_entry.grid(row=1, column=1)
+
+    tk.Label(root, text='Sample thickness (um):  ').grid(row=2, column=0)
+    thickness_entry = tk.Entry(root)
+    thickness_entry.grid(row=2, column=1)
+    
+    tk.Label(root, text='Reference refractive index:  ').grid(row=3, column=0)
+    reference_n_entry = tk.Entry(root)
+    reference_n_entry.grid(row=3, column=1)
 
     tk.Button(root, text='Calculate', command=get_user_input).grid(row=4, column=1)
     root.mainloop()
@@ -159,7 +159,7 @@ if __name__ == '__main__':
     df_diff.iloc[:,1] = df_sample['Signal (a.u.)'].values - df_shifted_ref['Signal (a.u.)'].values
     
     # start searching for second peak 12 ps after main peak
-    start_ps = main_peak_ps_sample + 12
+    start_ps = main_peak_ps_sample + 5
     second_peak_ind_sample, second_peak_ps_sample = find_peak(df_diff, start_ps=start_ps)
     print(f'Second peak at {second_peak_ps_sample:.2f} ps')
     ax = df_sample.plot(x='Delays (ps)', y='Signal (a.u.)')
@@ -175,8 +175,6 @@ if __name__ == '__main__':
     
     sample_window = create_window(df_sample ,second_peak_ps_sample)
     ref_window = create_window(df_sample, second_peak_ps_sample, offset=main_peak_delay_ps)
-
-    
     
     sample = create_signal(df_sample, window=sample_window)
     reference = create_signal(df_reference, window=ref_window)
