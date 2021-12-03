@@ -18,11 +18,12 @@ from tkinter.messagebox import showinfo
 c = 299792458
 
 class Signal:
-    def __init__(self, amplitude, phase, frequency, n=1, **kwargs):
+    def __init__(self, amplitude, phase, frequency, n=1, k=0, **kwargs):
         self.amplitude = amplitude
         self.phase = phase
         self.frequency = frequency
         self.n = n
+        self.k = k
 
 def read_data(filename, skip, sep):
     df = pd.read_csv(filename, sep=sep, skiprows=skip, names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
@@ -49,7 +50,7 @@ def calc_power(signal):
     '''returns the power spectrum in dB as an array'''
     return 20*np.log10(signal.amplitude/signal.amplitude.max())
 
-def calc_absorption(sample, reference):
+def calc_complex_n(sample, reference):
     '''returns the absorption and n of the sample as two arrays'''
     A = sample.amplitude / reference.amplitude
     phi = sample.phase - reference.phase
@@ -62,9 +63,9 @@ def calc_absorption(sample, reference):
     n_sample = 1 - c*phi/d/w
     
     t_co = 4*n_sample*n_ref/(n_sample+n_ref)**2
-    a = -2/(d*100)*np.log(A/t_co)
+    k_sample = -c/w*np.log(A/t_co)
     
-    return a, n_sample
+    return n_sample, k_sample
 
 def get_filenames():
     '''get names of csv files'''
@@ -155,6 +156,7 @@ if __name__ == '__main__':
 
     # shift reference to find FP
     df_shifted_ref = shift_data(df_reference, main_peak_delay_ind)
+    # get covariance and find minimum
     df_diff = df_sample[:].copy()
     df_diff.iloc[:,1] = df_sample['Signal (a.u.)'].values - df_shifted_ref['Signal (a.u.)'].values
     
@@ -183,7 +185,8 @@ if __name__ == '__main__':
     reference.n = reference_n
     
     # calculate optical parameters
-    sample.absorption, sample.n = calc_absorption(sample, reference)
+    sample.n, sample.k = calc_complex_n(sample, reference)
+    sample.absorption = 2*(2*np.pi*sample.frequency)/c*sample.k/100
     
     # TODO: calculate n obtained from first FP
     # TODO: calculate estimated sample thickness from the difference between n
