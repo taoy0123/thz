@@ -63,7 +63,7 @@ def calc_complex_n(sample, reference):
     n_sample = 1 - c*phi/d/w
     
     t_co = 4*n_sample*n_ref/(n_sample+n_ref)**2
-    k_sample = -c/w*np.log(A/t_co)
+    k_sample = -c/d/w*np.log(A/t_co)
     
     return n_sample, k_sample
 
