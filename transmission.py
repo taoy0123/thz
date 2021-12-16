@@ -42,9 +42,15 @@ def create_signal(df, window=1):
     xf = rfft(xt*window)
     f = rfftfreq(len(xt), dT)
     
-    phase = np.angle(xf)
-    
-    return Signal(abs(xf), np.unwrap(phase), f)
+    amplitude = abs(xf)
+    phase = np.unwrap(np.angle(xf))
+    # shift all phase below zero
+    ind = int(1*10**12 / f[1])
+    gradient = (phase[ind+1]-phase[ind]) / (f[ind+1]-f[ind])
+    y_int = phase[ind] - (gradient * f[ind])
+    phase -= y_int
+
+    return Signal(amplitude[1:], phase[1:], f[1:])
 
 def calc_power(signal):
     '''returns the power spectrum in dB as an array'''
