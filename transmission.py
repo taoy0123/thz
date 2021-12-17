@@ -29,15 +29,13 @@ def read_data(filename, skip, sep):
     df = pd.read_csv(filename, sep=sep, skiprows=skip, names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
     return df
 
+
 def create_signal(df, window=1):
     '''returns the fft of signal in amplitude and phase as a signal object'''
     
     t = df['Delays (ps)'].values * 10**-12
     xt = df['Signal (a.u.)'].values
-    
-    T = max(t) - min(t)
-    dT = T/(len(t)-1)
-    
+    dT = t[2] - t[1]
     
     xf = rfft(xt*window)
     f = rfftfreq(len(xt), dT)
@@ -56,10 +54,16 @@ def calc_power(signal):
     '''returns the power spectrum in dB as an array'''
     return 20*np.log10(signal.amplitude/signal.amplitude.max())
 
-def calc_complex_n(sample, reference):
-    '''returns the absorption and n of the sample as two arrays'''
+def calc_t_meas(sample, reference):
+    '''returns t_meas'''
     A = sample.amplitude / reference.amplitude
     phi = sample.phase - reference.phase
+    return A, phi
+
+def calc_complex_n(sample, reference):
+    '''returns the absorption and n of the sample as two arrays'''
+
+    A, phi = calc_t_meas(sample, reference)
 
     w = 2*np.pi*sample.frequency
 
@@ -72,6 +76,22 @@ def calc_complex_n(sample, reference):
     k_sample = -c/d/w*np.log(A/t_co)
     
     return n_sample, k_sample
+
+def calc_FP(sample, reference, p=np.inf):
+    d = sample.thickness
+    w = sample.frequency
+    n_s_complex = sample.n - 1j*sample.k
+    n_r_complex = reference.n - 1j*reference.k
+
+    X = ((n_s_complex - n_r_complex) / (n_s_complex + n_r_complex) * np.exp(-1j*w*d/c*n_s_complex))**2
+
+    if type(p) == int:
+        FP = np.full((len(X),), 0+0j)
+        for i in range(p+1):
+            FP += X**i
+    else:
+        FP = 1/(1-X)
+    return FP
 
 def get_filenames():
     '''get names of csv files'''
@@ -184,18 +204,56 @@ if __name__ == '__main__':
     sample_window = create_window(df_sample ,second_peak_ps_sample)
     ref_window = create_window(df_sample, second_peak_ps_sample, offset=main_peak_delay_ps)
     
+    # calculate optical parameters
     sample = create_signal(df_sample, window=sample_window)
     reference = create_signal(df_reference, window=ref_window)
-    
+    sample_raw = create_signal(df_sample)
+    reference_raw = create_signal(df_reference)
+
     sample.thickness = sample_thickness
     reference.n = reference_n
+    sample_raw.thickness = sample_thickness
+    reference_raw.n = reference_n
     
     # calculate optical parameters
     sample.n, sample.k = calc_complex_n(sample, reference)
     sample.absorption = 2*(2*np.pi*sample.frequency)/c*sample.k/100
+    sample_raw.n, sample_raw.k = calc_complex_n(sample_raw, reference_raw)
+    sample_raw.absorption = 2*(2*np.pi*sample_raw.frequency)/c*sample_raw.k/100
     
-    # TODO: calculate n obtained from first FP
-    # TODO: calculate estimated sample thickness from the difference between n
+    # explore oscillation in t_meas due to FP
+    A, phi = calc_t_meas(sample, reference)
+    A_raw, phi_raw = calc_t_meas(sample_raw, reference_raw)
+
+    ## Fourier transform t_meas to find freq of oscillation
+    # xt = A_raw[5:100] - A[5:100]
+    # xf_raw = rfft(xt)
+    # dT = sample.frequency[2] - sample.frequency[1]
+    # f = rfftfreq(len(xt), dT)
+
+    # fig, axs = plt.subplots(2)
+    # axs[0].plot(sample.frequency[5:100]*10**-12, xt, label='raw')
+    # axs[0].set_ylabel('modulus of t_meas')
+    # axs[0].legend()
+    # axs[1].plot(f*c/2/sample.n[30]*10**6, abs(xf_raw), label='diff')
+    # axs[1].set_yscale('log')
+    # axs[1].set_ylabel('FFT of modulus of t_meas')
+    # axs[1].legend()
+    # plt.show()
+
+    ## calc FP using best guess of n-jk and divide t_meas by FP to remove it
+    FP = calc_FP(sample, reference, p=1)
+    A_div_FP = A_raw / np.absolute(FP)
+
+    plt.plot(sample.frequency*10**-12, A_raw, label='raw')
+    plt.plot(sample.frequency*10**-12, A, label='filtered')
+    plt.plot(sample.frequency*10**-12, A_div_FP, label='div FP')
+    plt.xlim([0,5])
+    plt.xlabel('t_meas (a.u.)')
+    plt.ylim([0, 2.5])
+    plt.ylabel('Frequency (THz)')
+    plt.legend()
+    plt.show()
     
     # calculate power spectra
     sample.power = calc_power(sample)
@@ -205,32 +263,30 @@ if __name__ == '__main__':
     fig, axs = plt.subplots(2, 2)
     
     axs[0,0].plot(sample.frequency*10**-12, sample.n)
-    axs[1,0].plot(sample.frequency*10**-12, sample.absorption)
+    axs[0,0].set_xlim([0.2, 5])
+    axs[0,0].set_ylim([0,3])
+    axs[0,0].set_xlabel('Frequency (THz)')
+    axs[0,0].set_ylabel('Refractive index')
 
     axs[0,1].plot(df_sample['Delays (ps)'].values, df_sample['Signal (a.u.)'].values, label='Sample')
     axs[0,1].plot(df_shifted_ref['Delays (ps)'].values, df_shifted_ref['Signal (a.u.)'].values, label='Shifted reference')
     axs[0,1].plot(df_sample['Delays (ps)'].values, sample_window, label='Sample window')
     axs[0,1].axvline(x=second_peak_ps_sample, color='r')
+    axs[0,1].set_xlabel('Delays (ps)')
+    axs[0,1].set_ylabel('Signal (a.u.)')
+    axs[0,1].legend()
+    
+    axs[1,0].plot(sample.frequency*10**-12, sample.absorption)
+    axs[1,0].set_xlim([0.2, 5])
+    axs[1,0].set_ylim(bottom=0)
+    axs[1,0].set_xlabel('Frequency (THz)')
+    axs[1,0].set_ylabel('Absorption coefficient ($cm^{-1}$)')
 
     axs[1,1].plot(sample.frequency*10**-12, sample.power, label='Sample')
     axs[1,1].plot(reference.frequency*10**-12, reference.power, label='Reference') 
-    
-    axs[0,0].set_xlim([0.2, 5])
-    axs[0,0].set_ylim([0,3])
-    axs[1,0].set_xlim([0.2, 5])
-    axs[1,0].set_ylim(bottom=0)
     axs[1,1].set_xlim([0, 10])
-    
-    axs[0,0].set_xlabel('Frequency (THz)')
-    axs[0,0].set_ylabel('Refractive index')
-    axs[1,0].set_xlabel('Frequency (THz)')
-    axs[1,0].set_ylabel('Absorption coefficient ($cm^{-1}$)')
-    axs[0,1].set_xlabel('Delays (ps)')
-    axs[0,1].set_ylabel('Signal (a.u.)')
     axs[1,1].set_xlabel('Frequency (THz)')
     axs[1,1].set_ylabel('Power (dB)')
-    
-    axs[0,1].legend()
     axs[1,1].legend()
     
     plt.tight_layout()
