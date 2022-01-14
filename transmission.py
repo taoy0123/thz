@@ -26,7 +26,7 @@ class Signal:
         self.k = k
 
 def read_data(filename, skip, sep):
-    df = pd.read_csv(filename, sep=sep, skiprows=skip, names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
+    df = pd.read_csv(filename, sep=sep, skiprows=skip, usecols=[0,1], names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
     return df
 
 
@@ -61,12 +61,11 @@ def calc_t_meas(sample, reference):
     return A, phi
 
 def calc_complex_n(sample, reference):
-    '''returns the absorption and n of the sample as two arrays'''
+    '''returns complex sample n_hat = n-jk as two arrays (n and k)'''
 
     A, phi = calc_t_meas(sample, reference)
 
     w = 2*np.pi*sample.frequency
-
     d = sample.thickness
     n_ref = reference.n
     
@@ -140,6 +139,17 @@ def get_user_input():
     sep = sep_entry.get()
     root.quit()
 
+def calc_theory_k(sample, T=300):
+    A = 4.044*10**4
+    B_0 = 1.391*10**5
+    v_0 = 233
+    f = sample.frequency
+    n = sample.n
+    h = 6.62607004*10**-34
+    k = 1.38064852
+
+    return 1/(2*n)*(A/f + (2*n*B_0*np.exp(h*c*v_0/k/T)/(4*np.pi*c*T*(np.exp(h*c*v_0/k/T)-1)**2*v_0**2))*f)
+    
 if __name__ == '__main__':
     
     # get user inputs
@@ -218,6 +228,7 @@ if __name__ == '__main__':
     # calculate optical parameters
     sample.n, sample.k = calc_complex_n(sample, reference)
     sample.absorption = 2*(2*np.pi*sample.frequency)/c*sample.k/100
+    sample.permittivity = (sample.n**2 - sample.k**2) - 1j*2*sample.n*sample.k
     sample_raw.n, sample_raw.k = calc_complex_n(sample_raw, reference_raw)
     sample_raw.absorption = 2*(2*np.pi*sample_raw.frequency)/c*sample_raw.k/100
     
@@ -245,20 +256,33 @@ if __name__ == '__main__':
     FP = calc_FP(sample, reference, p=1)
     A_div_FP = A_raw / np.absolute(FP)
 
-    plt.plot(sample.frequency*10**-12, A_raw, label='raw')
-    plt.plot(sample.frequency*10**-12, A, label='filtered')
-    plt.plot(sample.frequency*10**-12, A_div_FP, label='div FP')
-    plt.xlim([0,5])
-    plt.xlabel('t_meas (a.u.)')
-    plt.ylim([0, 2.5])
-    plt.ylabel('Frequency (THz)')
-    plt.legend()
-    plt.show()
+    # plt.plot(sample.frequency*10**-12, A_raw, label='raw')
+    # plt.plot(sample.frequency*10**-12, A, label='filtered')
+    # plt.plot(sample.frequency*10**-12, A_div_FP, label='div FP')
+    # plt.xlim([0,5])
+    # plt.xlabel('t_meas (a.u.)')
+    # plt.ylim([0, 2.5])
+    # plt.ylabel('Frequency (THz)')
+    # plt.legend()
+    # plt.show()
     
     # calculate power spectra
     sample.power = calc_power(sample)
     reference.power = calc_power(reference)
     
+    fig, axs = plt.subplots(2, sharex=True)
+    axs[0].plot(sample.frequency*10**-12, sample.amplitude, label='sample')
+    axs[0].plot(reference.frequency*10**-12, reference.amplitude, label='reference')
+    axs[1].plot(sample.frequency*10**-12, sample.phase, label='sample')
+    axs[1].plot(reference.frequency*10**-12, reference.phase, label='reference')
+    axs[0].set_xlim([0, 5])
+    axs[0].set_ylabel('FFT amplitude')
+    axs[1].set_xlabel('Frequency (THz)')
+    axs[1].set_ylabel('FFT phase')
+    axs[0].legend()
+    axs[1].legend()
+    plt.show()
+
     # plots for display
     fig, axs = plt.subplots(2, 2)
     
@@ -266,21 +290,25 @@ if __name__ == '__main__':
     axs[0,0].set_xlim([0.2, 5])
     axs[0,0].set_ylim([0,3])
     axs[0,0].set_xlabel('Frequency (THz)')
-    axs[0,0].set_ylabel('Refractive index')
+    axs[0,0].set_ylabel('n')
 
-    axs[0,1].plot(df_sample['Delays (ps)'].values, df_sample['Signal (a.u.)'].values, label='Sample')
-    axs[0,1].plot(df_shifted_ref['Delays (ps)'].values, df_shifted_ref['Signal (a.u.)'].values, label='Shifted reference')
-    axs[0,1].plot(df_sample['Delays (ps)'].values, sample_window, label='Sample window')
-    axs[0,1].axvline(x=second_peak_ps_sample, color='r')
-    axs[0,1].set_xlabel('Delays (ps)')
-    axs[0,1].set_ylabel('Signal (a.u.)')
-    axs[0,1].legend()
-    
-    axs[1,0].plot(sample.frequency*10**-12, sample.absorption)
+    axs[1,0].plot(sample.frequency*10**-12, sample.k)
     axs[1,0].set_xlim([0.2, 5])
-    axs[1,0].set_ylim(bottom=0)
     axs[1,0].set_xlabel('Frequency (THz)')
-    axs[1,0].set_ylabel('Absorption coefficient ($cm^{-1}$)')
+    axs[1,0].set_ylabel('k')
+
+    # axs[0,1].plot(sample.frequency*10**-12, sample.amplitude, label='sample')
+    # axs[0,1].plot(reference.frequency*10**-12, reference.amplitude, label='reference')
+    # axs[0,1].set_xlim([0.2, 5])
+    # axs[0,1].set_xlabel('Frequency (THz)')
+    # axs[0,1].set_ylabel('Amplitude')
+    # axs[0,1].legend()
+
+    axs[0,1].plot(sample.frequency*10**-12, sample.absorption)
+    axs[0,1].set_xlim([0.2, 5])
+    axs[0,1].set_ylim(bottom=0)
+    axs[0,1].set_xlabel('Frequency (THz)')
+    axs[0,1].set_ylabel('Absorption coefficient ($cm^{-1}$)')
 
     axs[1,1].plot(sample.frequency*10**-12, sample.power, label='Sample')
     axs[1,1].plot(reference.frequency*10**-12, reference.power, label='Reference') 
@@ -288,6 +316,14 @@ if __name__ == '__main__':
     axs[1,1].set_xlabel('Frequency (THz)')
     axs[1,1].set_ylabel('Power (dB)')
     axs[1,1].legend()
+
+    # axs[1,1].plot(sample.frequency*10**-12, np.real(sample.permittivity), label='Re[e]')
+    # axs[1,1].plot(sample.frequency*10**-12, np.imag(sample.permittivity), label='Im[e]')
+    # axs[1,1].set_xlim([0.2, 5])
+    # axs[1,1].set_xlabel('Frequency (THz)')
+    # axs[1,1].set_ylabel('Permittivity')
+    # axs[1,1].legend()
+
     
     plt.tight_layout()
     plt.show()
