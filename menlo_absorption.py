@@ -1,6 +1,6 @@
 '''
-Computes complex refractive index of sample given the sample and the reference time-domain electric fields
-Created by Yu Heng Tao 29 Nov 2021
+Calculates refractive index from FFT files obtained from menlo terasmart software
+Created by Yu Heng Tao 20 Feb 2022
 '''
 
 from turtle import forward
@@ -27,29 +27,12 @@ class Signal:
         self.k = k
 
 def read_data(filename, skip, sep):
-    df = pd.read_csv(filename, sep=sep, skiprows=skip, usecols=[0,1], names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
+    df = pd.read_csv(filename, sep=sep, skiprows=skip, names=['THz', 'amplitude', 'phase'], engine='python')
     return df
-
 
 def create_signal(df, window=1):
     '''returns the fft of signal in amplitude and phase as a signal object'''
-    
-    t = df['Delays (ps)'].values * 10**-12
-    xt = df['Signal (a.u.)'].values
-    dT = t[2] - t[1]
-    
-    xf = rfft(xt*window)
-    f = rfftfreq(len(xt), dT)
-    
-    amplitude = abs(xf)
-    phase = np.unwrap(np.angle(xf))
-    # shift all phase below zero
-    ind = int(1*10**12 / f[1])
-    gradient = (phase[ind+1]-phase[ind]) / (f[ind+1]-f[ind])
-    y_int = phase[ind] - (gradient * f[ind])
-    phase -= y_int
-
-    return Signal(amplitude[1:], phase[1:], f[1:])
+    return Signal(df['amplitude'], df['phase'], df['THz']*10**12)
 
 def calc_power(signal):
     '''returns the power spectrum in dB as an array'''
@@ -132,8 +115,6 @@ def create_window(df, second_peak_ps, offset=0):
 def get_user_input():
     global sample_thickness
     global reference_n
-    global system_name
-    system_name = var.get()
     sample_thickness = float(thickness_entry.get())*10**-6
     reference_n = float(reference_n_entry.get())
     root.quit()
@@ -149,150 +130,55 @@ def calc_theory_k(sample, T=300):
 
     return 1/(2*n)*(A/f + (2*n*B_0*np.exp(h*c*v_0/k/T)/(4*np.pi*c*T*(np.exp(h*c*v_0/k/T)-1)**2*v_0**2))*f)
 
-def set_skip_sep(system_name):
-    if system_name == 'teraview':
-        skip = 3
-        sep = ','
-    elif system_name == 'menlo':
-        skip = 7
-        sep = '\t'
-    else:
-        print(f'{system_name} not found.')
+def set_skip_sep():
+    skip = 0
+    sep = '\t'
     return skip, sep
 
 if __name__ == '__main__':
     
     # get user inputs
     root = tk.Tk()
-    var = tk.StringVar()
-    var.set('menlo')
 
     sample_filename, reference_filename = get_filenames()
-    tk.Radiobutton(root, text='Teraview', variable=var, value='teraview').grid(row=0, column=0)
-    tk.Radiobutton(root, text='Menlo', variable=var, value='menlo').grid(row=0, column=1)
-    
-    tk.Label(root, text='Sample thickness (um):  ').grid(row=1, column=0)
+
+    tk.Label(root, text='Sample thickness (um):  ').grid(row=0, column=0)
     thickness_entry = tk.Entry(root)
-    thickness_entry.grid(row=1, column=1)
+    thickness_entry.grid(row=0, column=1)
     
-    tk.Label(root, text='Reference refractive index:  ').grid(row=2, column=0)
+    tk.Label(root, text='Reference refractive index:  ').grid(row=1, column=0)
     reference_n_entry = tk.Entry(root)
-    reference_n_entry.grid(row=2, column=1)
+    reference_n_entry.grid(row=1, column=1)
 
     tk.Button(root, text='Calculate', command=get_user_input).grid(row=3, column=1)
     root.mainloop()
     root.withdraw()
     
     # read data
-    skip, sep = set_skip_sep(system_name)
+    skip, sep = set_skip_sep()
     df_sample = read_data(sample_filename, skip, sep)
     df_reference = read_data(reference_filename, skip, sep)
     
-    # find peaks
-    main_peak_ind_ref, main_peak_ps_ref = find_peak(df_reference)
-    main_peak_ind_sample, main_peak_ps_sample = find_peak(df_sample)
+    # create signals
 
-    main_peak_delay_ind = main_peak_ind_sample - main_peak_ind_ref
-    main_peak_delay_ps = main_peak_ps_sample - main_peak_ps_ref
-
-    # shift reference to find FP
-    df_shifted_ref = shift_data(df_reference, main_peak_delay_ind)
-    # get covariance and find minimum
-    df_diff = df_sample[:].copy()
-    df_diff.iloc[:,1] = df_sample['Signal (a.u.)'].values - df_shifted_ref['Signal (a.u.)'].values
-    
-    # start searching for second peak 12 ps after main peak
-    start_ps = main_peak_ps_sample + 5
-    second_peak_ind_sample, second_peak_ps_sample = find_peak(df_diff, start_ps=start_ps)
-    print(f'Second peak at {second_peak_ps_sample:.2f} ps')
-    ax = df_sample.plot(x='Delays (ps)', y='Signal (a.u.)')
-    df_shifted_ref.plot(x='Delays (ps)', y='Signal (a.u.)', ax=ax)
-    plt.axvline(x=second_peak_ps_sample,color='r')
-    plt.legend(['Sample', 'Shifted reference'])
-    plt.show()
-
-    # ask user for alternative FP peak location
-    second_peak_ps_sample_corrected = input('Enter alternative FP peak location (ps):  ')
-    if second_peak_ps_sample_corrected != '':
-        second_peak_ps_sample = float(second_peak_ps_sample_corrected)
-    
-    sample_window = create_window(df_sample ,second_peak_ps_sample)
-    ref_window = create_window(df_sample, second_peak_ps_sample, offset=main_peak_delay_ps)
-    
-    # calculate optical parameters
-
-    sample = create_signal(df_sample, window=sample_window)
-    reference = create_signal(df_reference, window=ref_window)  
+    sample = create_signal(df_sample)
+    sample.thickness = sample_thickness
+    reference = create_signal(df_reference)  
     reference.n = reference_n
-    
-    auto_thickness = c*10**-6/1.81105*(second_peak_ps_sample - main_peak_ps_sample)/2
-    use_auto_thickness = input(f'Estimated thicknes of ice is {auto_thickness} um; accept [y]/n ?:  ')
-    if use_auto_thickness != 'n':
-        sample.thickness = auto_thickness * 10**-6
-    else:
-        sample.thickness = sample_thickness
     
     # calculate optical parameters
     sample.n, sample.k = calc_complex_n(sample, reference)
     sample.absorption = 2*(2*np.pi*sample.frequency)/c*sample.k/100
-    sample.permittivity = (sample.n**2 - sample.k**2) - 1j*2*sample.n*sample.k
-    
-    # explore oscillation in t_meas due to FP
-    # A, phi = calc_t_meas(sample, reference)
-
-    ## Fourier transform t_meas to find freq of oscillation
-    # xt = A_raw[5:100] - A[5:100]
-    # xf_raw = rfft(xt)
-    # dT = sample.frequency[2] - sample.frequency[1]
-    # f = rfftfreq(len(xt), dT)
-
-    # fig, axs = plt.subplots(2)
-    # axs[0].plot(sample.frequency[5:100]*10**-12, xt, label='raw')
-    # axs[0].set_ylabel('modulus of t_meas')
-    # axs[0].legend()
-    # axs[1].plot(f*c/2/sample.n[30]*10**6, abs(xf_raw), label='diff')
-    # axs[1].set_yscale('log')
-    # axs[1].set_ylabel('FFT of modulus of t_meas')
-    # axs[1].legend()
-    # plt.show()
-
-    ## calc FP using best guess of n-jk and divide t_meas by FP to remove it
-    # FP = calc_FP(sample, reference, p=1)
-    # A_div_FP = A_raw / np.absolute(FP)
-
-    # plt.plot(sample.frequency*10**-12, A_raw, label='raw')
-    # plt.plot(sample.frequency*10**-12, A, label='filtered')
-    # plt.plot(sample.frequency*10**-12, A_div_FP, label='div FP')
-    # plt.xlim([0,5])
-    # plt.xlabel('t_meas (a.u.)')
-    # plt.ylim([0, 2.5])
-    # plt.ylabel('Frequency (THz)')
-    # plt.legend()
-    # plt.show()
     
     # calculate power spectra
     sample.power = calc_power(sample)
     reference.power = calc_power(reference)
     
-    # fig, axs = plt.subplots(2, sharex=True)
-    # axs[0].plot(sample.frequency*10**-12, sample.amplitude, label='sample')
-    # axs[0].plot(reference.frequency*10**-12, reference.amplitude, label='reference')
-    # axs[1].plot(sample.frequency*10**-12, sample.phase, label='sample')
-
-    # axs[1].plot(reference.frequency*10**-12, reference.phase, label='reference')
-    # axs[0].set_xlim([0, 5])
-    # axs[0].set_ylabel('FFT amplitude')
-    # axs[1].set_xlabel('Frequency (THz)')
-    # axs[1].set_ylabel('FFT phase')
-    # axs[0].legend()
-    # axs[1].legend()
-    # plt.show()
-
     # plots for display
     fig, axs = plt.subplots(2, 2)
     freq_range = np.arange(0, 5.5, 0.5)
+
     axs[0,0].plot(sample.frequency*10**-12, sample.n)
-    
     axs[0,0].set_ylim([0,3])
     axs[0,0].set_xlabel('Frequency (THz)')
     axs[0,0].set_ylabel('n')
@@ -305,13 +191,6 @@ if __name__ == '__main__':
     axs[1,0].set_xlabel('Frequency (THz)')
     axs[1,0].set_ylabel('k')
     axs[1,0].set_ylim([-0.1,0.4])
-
-    # axs[0,1].plot(sample.frequency*10**-12, sample.amplitude, label='sample')
-    # axs[0,1].plot(reference.frequency*10**-12, reference.amplitude, label='reference')
-    # axs[0,1].set_xlim([0.2, 5])
-    # axs[0,1].set_xlabel('Frequency (THz)')
-    # axs[0,1].set_ylabel('Amplitude')
-    # axs[0,1].legend()
 
     axs[0,1].plot(sample.frequency*10**-12, sample.absorption)
     axs[0,1].set_xticks(freq_range)
@@ -326,15 +205,7 @@ if __name__ == '__main__':
     axs[1,1].set_xlabel('Frequency (THz)')
     axs[1,1].set_ylabel('Power (dB)')
     axs[1,1].legend()
-
-    # axs[1,1].plot(sample.frequency*10**-12, np.real(sample.permittivity), label='Re[e]')
-    # axs[1,1].plot(sample.frequency*10**-12, np.imag(sample.permittivity), label='Im[e]')
-    # axs[1,1].set_xlim([0.2, 5])
-    # axs[1,1].set_xlabel('Frequency (THz)')
-    # axs[1,1].set_ylabel('Permittivity')
-    # axs[1,1].legend()
-
-    
+   
     plt.tight_layout()
     plt.show()
 
