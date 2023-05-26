@@ -28,16 +28,37 @@ class Signal:
 
 def read_data(filename, skip, sep):
     df = pd.read_csv(filename, sep=sep, skiprows=skip, usecols=[0,1], names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
+    # shifts optical delay to start at zero ps
+    df['Delays (ps)'] = df['Delays (ps)'] - df['Delays (ps)'][0]
     return df
 
 
-def create_signal(df, window=1):
+def create_signal(df, window=1, time_trace=False):
     '''returns the fft of signal in amplitude and phase as a signal object'''
     
     t = df['Delays (ps)'].values * 10**-12
     xt = df['Signal (a.u.)'].values
     dT = t[2] - t[1]
     
+    # export etalon-free time trace
+    if time_trace:
+        plt.plot(df['Delays (ps)'].values, xt, label='sample')
+        plt.plot(df['Delays (ps)'].values, window, label='window')
+        plt.legend()
+        plt.show()
+
+        showinfo(message='Save sample time trace') 
+        export_array = np.stack((df['Delays (ps)'].values, xt*window, window)).T[1:]
+        export_df = pd.DataFrame(export_array, columns=['ps','sample','window'])
+
+        try:
+            with filedialog.asksaveasfile(mode='w', defaultextension=".csv") as file:
+                export_df.to_csv(file.name, index=False)
+
+        except AttributeError:
+            # if user cancels save, filedialog returns None rather than a file object, and the 'with' will raise an error
+            print("The user cancelled save")
+
     xf = rfft(xt*window)
     f = rfftfreq(len(xt), dT)
     
@@ -66,15 +87,14 @@ def find_ind(array, threshold):
 
 def calc_DR(signal):
     ''' returns the freq-domain dynamic range as an array'''
-    # locate the start of noise floor
-    # noise_ind_start = np.where(signal.frequency>=6*10**12)[0][0]
+    # locate the start of noise floor, 6 THz
     noise_ind_start = find_ind(signal.frequency, 6*10**12)
-    # locate the end of noise floor as some systems may have artefacts at very high frequencies
-    try:
-        # noise_ind_end = np.where(signal.frequency>15*10**12)[0][0] 
+    # locate the end of noise floor as some systems may have artefacts at >15 THz
+    try: 
         noise_ind_end = find_ind(signal.frequency, 15*10**12)
     except IndexError:
-        noise_floor = np.mean(signal.amplitude[noise_ind_start:]) # if system has less than 15 THz assume no artefacts at high frequencies and use til end
+        # if system has less than 15 THz assume no artefacts at high frequencies and use all
+        noise_floor = np.mean(signal.amplitude[noise_ind_start:]) 
         return signal.amplitude/noise_floor
 
     noise_floor = np.mean(signal.amplitude[noise_ind_start:noise_ind_end])
@@ -144,23 +164,36 @@ def shift_data(df, offset=0):
 
 def create_window(df, second_peak_ps, offset=0):
     '''create time-window to exclude FP peaks'''
-    # butterworth window 50th order, 3 ps by trial and error
-    b, a = signal.butter(50, second_peak_ps-3-offset, analog=True)
+    # butterworth window 55th order, 3 ps by trial and error
+    b, a = signal.butter(55, second_peak_ps-3-offset, analog=True)
     w, h = signal.freqs(b, a, worN=df['Delays (ps)'].values)
-    if second_peak_ps < 0:
-        butter_window = 1-abs(h)
-    else:
-        butter_window = abs(h)
-    
+    butter_window = abs(h)
     return butter_window
  
 def get_user_input():
     global sample_thickness
     global reference_n
+    global sample_n
     global system_name
+
     system_name = var.get()
-    sample_thickness = float(thickness_entry.get())*10**-6
     reference_n = float(reference_n_entry.get())
+
+    try:
+        sample_thickness = float(thickness_entry.get())*10**-6
+    # if user did not input sample_thickness, check if sample_n was entered
+    except ValueError:
+        try: 
+            sample_n = float(sample_n_entry.get())
+        except ValueError:
+            print('Please entre either sample thickness or sample refractive index')
+        sample_thickness = False
+
+    try:
+        sample_n = float(sample_n_entry.get())
+    except ValueError:
+        sample_n = False
+    
     root.quit()
 
 def calc_theory_k(sample, T=300):
@@ -200,15 +233,20 @@ if __name__ == '__main__':
     tk.Radiobutton(root, text='TOPTICA', variable=var, value='toptica').grid(row=0, column=1)
     tk.Radiobutton(root, text='Menlo', variable=var, value='menlo').grid(row=1, column=0)
     
-    tk.Label(root, text='Sample thickness (um):  ').grid(row=2, column=0)
-    thickness_entry = tk.Entry(root)
-    thickness_entry.grid(row=2, column=1)
-    
-    tk.Label(root, text='Reference refractive index:  ').grid(row=3, column=0)
+    tk.Label(root, text='Reference refractive index:  ').grid(row=2, column=0)
     reference_n_entry = tk.Entry(root)
-    reference_n_entry.grid(row=3, column=1)
+    reference_n_entry.grid(row=2, column=1)
+   
+    tk.Label(root, text='Sample thickness (um):  ').grid(row=3, column=0)
+    thickness_entry = tk.Entry(root)
+    thickness_entry.grid(row=3, column=1)
+    
 
-    tk.Button(root, text='Calculate', command=get_user_input).grid(row=4, column=1)
+    tk.Label(root, text='Sample refractive index:  ').grid(row=4, column=0)
+    sample_n_entry = tk.Entry(root)
+    sample_n_entry.grid(row=4, column=1)
+
+    tk.Button(root, text='Calculate', command=get_user_input).grid(row=5, column=1)
     root.mainloop()
     root.withdraw()
     
@@ -226,6 +264,7 @@ if __name__ == '__main__':
 
     # shift reference to find FP
     df_shifted_ref = shift_data(df_reference, main_peak_delay_ind)
+
     # get covariance and find minimum
     df_diff = df_sample[:].copy()
     df_diff.iloc[:,1] = df_sample['Signal (a.u.)'].values - df_shifted_ref['Signal (a.u.)'].values
@@ -252,13 +291,31 @@ if __name__ == '__main__':
     sample = create_signal(df_sample, window=sample_window)
     reference = create_signal(df_reference, window=ref_window)  
     reference.n = reference_n
-    sample.thickness = sample_thickness
+
+
+    # if user left sample thickness blank, calculate from user input refractive index 
+    if not sample_thickness:
+        sample.thickness = c*10**-6/sample_n*(second_peak_ps_sample - main_peak_ps_sample)/2*10**-6
+
+    # if user inputs sample thickness AND sample refractive index, let user choose 
+    elif sample_n:
+        sample.thickness = sample_thickness
+        assumed_n = sample_n
+        auto_thickness = c*10**-6/assumed_n*(second_peak_ps_sample - main_peak_ps_sample)/2
+        use_auto_thickness = input(f'Estimated sample thicknes from etalon is {auto_thickness} um; accept y/[n] ?:  ')
+        if use_auto_thickness == 'y':
+            sample.thickness = auto_thickness * 10**-6         
+    
+    # if user inputs sample thickness only, use that value 
+    else:
+        sample.thickness = sample_thickness
 
     # estimate thickness with known estimate of average refractive index. For ice n~=1.81105
-    # auto_thickness = c*10**-6/1.81105*(second_peak_ps_sample - main_peak_ps_sample)/2
+    # assumed_n_ice = 1.815
+    # auto_thickness = c*10**-6/assumed_n_ice*(second_peak_ps_sample - main_peak_ps_sample)/2
     # use_auto_thickness = input(f'Estimated thicknes of ice is {auto_thickness} um; accept [y]/n ?:  ')
     # if use_auto_thickness != 'n':
-    #     sample.thickness = auto_thickness * 10**-6
+    #    sample.thickness = auto_thickness * 10**-6
     
     # calculate optical parameters
     sample.n, sample.k = calc_complex_n(sample, reference)
@@ -319,6 +376,6 @@ if __name__ == '__main__':
         with filedialog.asksaveasfile(mode='w', defaultextension=".csv") as file:
             export_df.to_csv(file.name, index=False)
 
-    except AttributeError:
+    except TypeError:
         # if user cancels save, filedialog returns None rather than a file object, and the 'with' will raise an error
         print("The user cancelled save")
