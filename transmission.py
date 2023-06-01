@@ -296,6 +296,7 @@ if __name__ == '__main__':
     # if user left sample thickness blank, calculate from user input refractive index 
     if not sample_thickness:
         sample.thickness = c*10**-6/sample_n*(second_peak_ps_sample - main_peak_ps_sample)/2*10**-6
+        print(f'Estimated sample thicknes from etalon is {sample.thickness} um.')
 
     # if user inputs sample thickness AND sample refractive index, let user choose 
     elif sample_n:
@@ -309,6 +310,7 @@ if __name__ == '__main__':
     # if user inputs sample thickness only, use that value 
     else:
         sample.thickness = sample_thickness
+        print(f'Used input sample thicknes of {sample.thickness} um.')
 
     # estimate thickness with known estimate of average refractive index. For ice n~=1.81105
     # assumed_n_ice = 1.815
