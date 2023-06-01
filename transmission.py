@@ -311,13 +311,6 @@ if __name__ == '__main__':
     else:
         sample.thickness = sample_thickness
         print(f'Used input sample thicknes of {sample.thickness} um.')
-
-    # estimate thickness with known estimate of average refractive index. For ice n~=1.81105
-    # assumed_n_ice = 1.815
-    # auto_thickness = c*10**-6/assumed_n_ice*(second_peak_ps_sample - main_peak_ps_sample)/2
-    # use_auto_thickness = input(f'Estimated thicknes of ice is {auto_thickness} um; accept [y]/n ?:  ')
-    # if use_auto_thickness != 'n':
-    #    sample.thickness = auto_thickness * 10**-6
     
     # calculate optical parameters
     sample.n, sample.k = calc_complex_n(sample, reference)
