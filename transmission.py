@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 np.seterr(divide='ignore', invalid='ignore') #ignore divide by zero warning
 import matplotlib.pyplot as plt
+import statistics
 from scipy import signal
 from scipy.fft import rfft, rfftfreq
 import tkinter as tk
@@ -38,7 +39,11 @@ def create_signal(df, window=1, time_trace=False):
     
     t = df['Delays (ps)'].values * 10**-12
     xt = df['Signal (a.u.)'].values
-    dT = t[2] - t[1]
+    # find the most common delay increments as it could vary
+    # dT = t[2] - t[1]
+    dt = t[1:]-t[:-1]
+    dT = statistics.mode(dt)
+    
     
     # export etalon-free time trace
     if time_trace:
@@ -67,11 +72,14 @@ def create_signal(df, window=1, time_trace=False):
 
     phase = np.unwrap(angle)
 
-    # shift all phase below zero
+    # shift all phase values below zero
+    # find the index of 1 THz
     ind = int(1*10**12 / f[1])
-
+    # calculates the gradient at 1 THz
     gradient = (phase[ind+1]-phase[ind]) / (f[ind+1]-f[ind])
+    # extrapolates the phase from 1 THz to 0 THz using the gradient
     y_int = phase[ind] - (gradient * f[ind])
+    # if the phase at 0 THz is non-zero, makes it zero by shifting all phases
     phase -= y_int
 
     return Signal(amplitude[1:], phase[1:], f[1:])
@@ -296,7 +304,7 @@ if __name__ == '__main__':
     # if user left sample thickness blank, calculate from user input refractive index 
     if not sample_thickness:
         sample.thickness = c*10**-6/sample_n*(second_peak_ps_sample - main_peak_ps_sample)/2*10**-6
-        print(f'Estimated sample thicknes from etalon is {sample.thickness} um.')
+        print(f'Estimated sample thicknes from etalon is {sample.thickness*10**6} um.')
 
     # if user inputs sample thickness AND sample refractive index, let user choose 
     elif sample_n:
