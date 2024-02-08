@@ -30,7 +30,11 @@ class Signal:
 def read_data(filename, skip, sep):
     df = pd.read_csv(filename, sep=sep, skiprows=skip, usecols=[0,1], names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
     # shifts optical delay to start at zero ps
-    df['Delays (ps)'] = df['Delays (ps)'] - df['Delays (ps)'][0]
+    try:
+        df['Delays (ps)'] = df['Delays (ps)'] - df['Delays (ps)'][0]
+    except TypeError:
+        df = pd.read_csv(filename, sep=sep, skiprows=skip+1, usecols=[0,1], names=['Delays (ps)', 'Signal (a.u.)'], engine='python')
+        df['Delays (ps)'] = df['Delays (ps)'] - df['Delays (ps)'][0]
     return df
 
 
@@ -68,8 +72,8 @@ def create_signal(df, window=1, time_trace=False):
     f = rfftfreq(len(xt), dT)
     
     amplitude = abs(xf)
-    angle = np.angle(xf)
 
+    angle = np.angle(xf)
     phase = np.unwrap(angle)
 
     # shift all phase values below zero
@@ -223,7 +227,7 @@ def set_skip_sep(system_name):
         skip = 1
         sep = ','
     elif system_name == 'menlo':
-        skip = 7
+        skip = 6
         sep = '\t'
     else:
         print(f'{system_name} not found.')
@@ -237,7 +241,7 @@ if __name__ == '__main__':
     var.set('menlo')
 
     sample_filename, reference_filename = get_filenames()
-    tk.Radiobutton(root, text='Teraview', variable=var, value='teraview').grid(row=0, column=0)
+    tk.Radiobutton(root, text='TeraView', variable=var, value='teraview').grid(row=0, column=0)
     tk.Radiobutton(root, text='TOPTICA', variable=var, value='toptica').grid(row=0, column=1)
     tk.Radiobutton(root, text='Menlo', variable=var, value='menlo').grid(row=1, column=0)
     
@@ -288,12 +292,21 @@ if __name__ == '__main__':
     plt.show()
 
     # ask user for alternative FP peak location
-    second_peak_ps_sample_corrected = input('Input alternative FP peak location (ps) or press Enter if location found was acceptable:  ')
-    if second_peak_ps_sample_corrected != '':
+    second_peak_ps_sample_corrected = input('Input alternative FP peak location (ps). Press Enter if location found was acceptable. Input n to disable window:  ')
+    # if user input n, disable etalon filter window
+    if second_peak_ps_sample_corrected == 'n':
+        sample_window = 1
+        ref_window = 1
+        print('Etalon window disabled')
+    # if user pressed Enter, use automatically detected etalon location
+    elif second_peak_ps_sample_corrected == '':
+        sample_window = create_window(df_sample ,second_peak_ps_sample)
+        ref_window = create_window(df_sample, second_peak_ps_sample, offset=main_peak_delay_ps)
+    # use etalon location chosen by user
+    else:
         second_peak_ps_sample = float(second_peak_ps_sample_corrected)
-    
-    sample_window = create_window(df_sample ,second_peak_ps_sample)
-    ref_window = create_window(df_sample, second_peak_ps_sample, offset=main_peak_delay_ps)
+        sample_window = create_window(df_sample ,second_peak_ps_sample)
+        ref_window = create_window(df_sample, second_peak_ps_sample, offset=main_peak_delay_ps)
     
     # calculate optical parameters
     sample = create_signal(df_sample, window=sample_window)
@@ -318,7 +331,7 @@ if __name__ == '__main__':
     # if user inputs sample thickness only, use that value 
     else:
         sample.thickness = sample_thickness
-        print(f'Used input sample thicknes of {sample.thickness} um.')
+        print(f'Used input sample thicknes of {round(sample.thickness*10**6)} um.')
     
     # calculate optical parameters
     sample.n, sample.k = calc_complex_n(sample, reference)
