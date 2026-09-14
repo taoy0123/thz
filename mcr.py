@@ -73,10 +73,6 @@ def read_data(display, start_wavenum, end_wavenum):
 def normalize(v):
     return v / np.max(np.abs(v))
 
-# Step 1 — Prepare inputs
-# X: your measured spectra (glycine + HCl)
-# shape: (n_samples, n_freq)
-
 def save_result(df, parameter, index=True):
     '''saves parameter as csv file'''
     showinfo(message=f'Select save location of {parameter}') 
@@ -88,6 +84,9 @@ def save_result(df, parameter, index=True):
     # if user cancels save, filedialog returns None rather than a file object, and the 'with' will raise an error
         print(f"The user cancelled saving {parameter}")
 
+# Step 1 — Prepare inputs
+# X: your measured spectra (glycine + HCl)
+# shape: (n_samples, n_freq)
 
 # asks custom frequency range
 start_wavenum = float(input('Starting wavenumber (cm-1):  '))
@@ -95,13 +94,13 @@ end_wavenum = float(input('Ending wavenumber (cm-1):  '))
 print(f'Performing MCR from {start_wavenum} to {end_wavenum} cm-1')
 
 # import spectra
-freq, X, hcl_conc = read_data('Select mixture file', start_wavenum, end_wavenum)
+freq, X, conditions = read_data('Select file with spectra', start_wavenum, end_wavenum)
 # Known spectra
-_, S_hcl, _ = read_data('Select acid or base file', start_wavenum, end_wavenum)
-_, S_gly, _ = read_data('Select amino acid file', start_wavenum, end_wavenum)
+_, S_1, _ = read_data('Select file with known component 1', start_wavenum, end_wavenum)
+# _, S_2, _ = read_data('Select file with known component 2', start_wavenum, end_wavenum)
 
-fix_hcl = ConstraintFixComponent(S_hcl, index=0)
-fix_gly = ConstraintFixComponent(S_gly, index=1)
+fix_1 = ConstraintFixComponent(S_1, index=0)
+# fix_2 = ConstraintFixComponent(S_2, index=1)
 
 # Step 2 — Build initial Sᵀ
 n_freq = X.shape[1]
@@ -111,35 +110,37 @@ n_freq = X.shape[1]
 # S_unk1 = np.random.rand(n_freq)
 
 # initialise unknown component 1 using the residuals of nnls
-A = np.vstack([S_hcl, S_gly]).T
+# A = np.vstack([S_1, S_2]).T
+A = np.vstack([S_1]).T
 sample = X[2]
 coeffs, _ = nnls(A, sample)
 fit = A @ coeffs
 residual = sample - fit
 S_unk1 = residual
 
-# initialise unknown component 2
-S_unk2 = sample - np.mean([S_hcl, S_gly], axis=0)
+# # initialise unknown component 2
+# S_unk2 = sample - np.mean([S_1, S_2], axis=0)
 
 ST_init = np.vstack([
-    normalize(S_hcl),
-    normalize(S_gly),
-    normalize(S_unk1),
-    normalize(S_unk2)
+    #normalize(S_1),
+    S_1,
+    # normalize(S_2),
+    normalize(S_unk1)
+    # normalize(S_unk2)
 ])  # shape: (4, n_freq)
 
 
 # Step 4 — Run MCR
 mcr = McrAR(
     c_constraints=[
-        ConstraintNonneg(),
+        # ConstraintNonneg(),
         # ConstraintClosure(total=1.0)   # only if justified
     ],
     st_constraints=[
-        ConstraintNonneg(),
+        # ConstraintNonneg(),
         # ConstraintSmooth(window_length=9, polyorder=2),  # only if justified
-        fix_hcl, 
-        fix_gly
+        fix_1 
+        # fix_2
     ],
     max_iter=200
 )
@@ -149,9 +150,16 @@ mcr.fit(X, ST=ST_init)
 C = mcr.C_      # (n_samples, n_components)
 ST = mcr.ST_    # (n_components, n_freq)
 
+# normalise the score of comoponent 2
+scale = np.max(C[:, 1])
+C[:, 1] /= scale
+ST[1, :] *= scale
+
 # Plot
 # Example labels (edit as needed)
-component_labels = ['HCl', 'Glycine', 'Unknown 1', 'Unknown 2']
+# component_labels = ['Known component 1', 'Known component 2', 'Unknown 1', 'Unknown 2']
+# component_labels = ['Known component 1', 'Known component 2', 'Unknown component']
+component_labels = ['Known component 1', 'Unknown component']
 
 # Create figure
 fig, axes = plt.subplots(2, ST_init.shape[0], figsize=(16, 8))
@@ -167,12 +175,19 @@ for i in range(ST_init.shape[0]):
 # --- Bottom row: Concentrations vs HCl ---
 for i in range(ST_init.shape[0]):
     ax = axes[1, i]
-    ax.plot(hcl_conc, C[:, i], marker='o')
+    ax.plot(conditions, C[:, i], marker='o')
     ax.set_title(f'{component_labels[i]} Contribution')
-    ax.set_xlabel('HCl Concentration (mM)')
+    ax.set_xlabel('Conditions')
     ax.set_ylabel('Contribution')
 
 plt.tight_layout()
+plt.show()
+
+# plot reconstructed spectra
+reconstructed_da = C @ ST
+plt.plot(freq, X[2])
+plt.plot(freq, reconstructed_da[2],linestyle='--')
+plt.legend(['measured','reconstructed'])
 plt.show()
 
 # Residuals
@@ -189,7 +204,7 @@ for i in range(R.shape[0]):
 plt.xlabel('Frequency')
 plt.ylabel('Residual')
 plt.title('Residual Spectra')
-plt.legend(hcl_conc)
+plt.legend(conditions)
 plt.show()
 
 # Plot residual norm
@@ -197,10 +212,10 @@ plt.show()
 # if increasing with concentration or non-monotonic, then model missing physics at high ionic strength or something changing
 
 res_norm = np.linalg.norm(R, axis=1)
-plt.plot(hcl_conc, res_norm, marker='o')
-plt.xlabel('HCl Concentration (mM)')
+plt.plot(conditions, res_norm, marker='o')
+plt.xlabel('Conditions')
 plt.ylabel('Residual Norm')
-plt.title('Fit Error vs HCl Concentration')
+plt.title('Fit Error vs Conditions')
 plt.show()
 
 # Plot heatmap
@@ -229,15 +244,21 @@ plt.show()
 save = input('Save results y/[n]? :   ')
 if save == 'y':
     # construct dataframes
+    # df_spectra = pd.DataFrame(ST.T, columns=[
+    # 'Known component 1', 'Known component 2', 'Unknown1'
+    # ])
     df_spectra = pd.DataFrame(ST.T, columns=[
-    'HCl', 'Gly', 'Unknown1'
+    'Known component 1', 'Unknown1'
     ])
     df_spectra['Frequency'] = freq
 
+    # df_conc = pd.DataFrame(C, columns=[
+    # 'Known component 1', 'Known component 2', 'Unknown1'
+    # ])
     df_conc = pd.DataFrame(C, columns=[
-    'HCl', 'Gly', 'Unknown1'
+    'Known component 1', 'Unknown1'
     ])
-    df_conc['HCl_concentration'] = hcl_conc
+    df_conc['Conditions'] = conditions
 
     save_result(df_spectra, 'spectra', index=False)
-    save_result(df_conc, 'concentrations', index=False)
+    save_result(df_conc, 'conditions', index=False)

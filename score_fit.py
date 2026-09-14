@@ -56,7 +56,7 @@ conc_aa = 1
 # Glycine: PKa = 2.34, PKb = 9.6
 # Serine: PKa = 2.21, PKb = 9.15
 # Proline: PKa = 1.99, PKb = 10.96
-PKab = 2.34
+PKab = 10.96
 Kab = 10 ** (-PKab)
 
 # specify frequency range (must be the same as PCA)
@@ -94,15 +94,20 @@ rank = 4
 fig, axes = plt.subplots(nrows=2, ncols=rank)
 for i in range(rank):
     # plot basis spectra
+    # flip spectrum and score if negative
+    if np.sum(population[:,i]<0) >= np.sum(population[:,i]>0):
+        spectrum[i,:] = -spectrum[i,:]
+        population[:,i] = -population[:,i]
     axes[0,i].plot(wavenumbers,spectrum[i,:])
     axes[0,i].set_title(f'Principal Component {i+1} ({weight[i]*100:.2f}%)')
     axes[0,i].set(xlabel='Wavenumber (cm$^{-1}$)', ylabel='Signal intensity (a.u.)')
     basis_spectra.append(spectrum[i,:])
     # plot scores
     axes[1,i].plot(conditions, population[:,i], marker='o', linestyle='-')
-    axes[1,i].set(xlabel='Temperatures ($^{o}$C)', ylabel='Population (a.u.)')
+    axes[1,i].set(xlabel='Conditions', ylabel='Population (a.u.)')
     populations.append(population[:,i])
 plt.show()
+
 
 PCs = np.array(basis_spectra)
 PC1 = PCs[0]
@@ -114,14 +119,16 @@ score_2 = scores[1]
 
 # import scores and acid/base concentrations
 conc_ab = conditions / 1000
+# conc_ab = conditions
 
-# perform curve fitting
+# Fit score 1 with fitting function
 parameters_1, covariance_1 = curve_fit(
     lambda conc_ab, A, B: score_fit(conc_ab, A, B, conc_aa, Kab),
     conc_ab, 
     score_1
 )
 
+# Fit score 2 with fitting function
 parameters_2, covariance_2 = curve_fit(
     lambda conc_ab, A, B: score_fit(conc_ab, A, B, conc_aa, Kab),
     conc_ab, 
@@ -149,6 +156,17 @@ axes[1].set(xlabel='Acid/Base concentration (M)', ylabel='Score')
 plt.legend()
 plt.show()
 
+# Save results
+save_result(pd.DataFrame(
+    np.column_stack((wavenumbers, PCs.T))
+    ), 'Select save location of PCs', index=False)
+save_result(pd.DataFrame(
+    np.column_stack((conc_ab, np.array(populations).T))
+    ), 'Select save location of scores', index=False)
+save_result(pd.DataFrame(
+    np.column_stack((conc_ab, fit_y1.T, fit_y2.T))
+    ), 'Select save location of fits', index=False)
+save_result(pd.DataFrame(np.array(weight).T), 'Select save location of weights', index=False)
 
 # # reconstruct using score 1 and 2
 # score_1 = score_1[:, None]
@@ -160,31 +178,48 @@ plt.show()
 # fit_y2 = fit_y2[:, None]
 # reconstructed_spectra = PC1 * fit_y1 + PC2 * fit_y2
 
-# reconstruct using A and B
+# reconstruct spectra  using A and B
 conc_ab = conc_ab[:, None]
 x = conc_ab + conc_aa + Kab
 beta = (x-np.sqrt(-4*conc_ab*conc_aa+(x)**2))/2
 reconstructed_spectra = (A[0] * PC1 + A[1] * PC2) * conc_ab + (B[0] * PC1 + B[1] * PC2) * beta
+reconstructed_spectra_ab = (A[0] * PC1 + A[1] * PC2)
+
+# import measured acid/base spectrum
+_, a_ab, _ = read_data('Select acid/base spectrum file', start_x=start_wavenum, end_x=end_wavenum)
+a_ab = a_ab[0]
 
 # check reconstructed spectra vs original
 plt.title('Effective absorption: data vs reconstructed')
 plt.plot(wavenumbers, data[2], 'o', label='Measured (1M)')
 plt.plot(wavenumbers, reconstructed_spectra[2], '-', label='Reconstructed (1M)')
+plt.plot(wavenumbers, a_ab,  label='Measured HCl or NaOH (1M)')
+plt.plot(wavenumbers, reconstructed_spectra_ab, label='Reconstructed HCl or NaOH (1M)')
 plt.xlabel('Wavenumber (cm-1)')
-plt.ylabel('Effective absorption')
+plt.ylabel('Effective absorption coefficient')
 plt.legend()
 plt.show()
+
+# save reconstructed acid or base spectrum
+df_da_ab = pd.DataFrame({
+    "wavenumber": wavenumbers,
+    "HCl/NaOH": reconstructed_spectra_ab
+})
+save_result(df_da_ab, 'Select save location of HCl/NaOH spectrum', index=False)
+
 
 # calculate protonated/deprotonated amino acid spectrum
 # import measured amino acid spectrum
 _, a_aa, _ = read_data('Select amino acid spectrum file', start_x=start_wavenum, end_x=end_wavenum)
 a_aa = a_aa[0]
-# import measured acid/base spectrum
-_, a_ab, _ = read_data('Select acid/base spectrum file', start_x=start_wavenum, end_x=end_wavenum)
-a_ab = a_ab[0]
+
 
 # calculate difference spectra
 da = (B[0] * PC1 + B[1] * PC2)
+
+# #calculate HCl or NaOH contributions
+# da_ab = (A[0]*PC1 + A[1]*PC2)
+
 # calculate protonated/deprotonated amino acid spectrum
 a_charged_aa = da + a_aa + a_ab
 
@@ -204,3 +239,4 @@ df_charged_aa = pd.DataFrame({
     "(de)protonated": a_charged_aa
 })
 save_result(df_charged_aa, 'Select save location of (de)protonated spectrum', index=False)
+
